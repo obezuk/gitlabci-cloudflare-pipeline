@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: 2010-09-09
+Metadata:
+  'AWS::CloudFormation::Designer':
+    e5106a58-3c1e-43f9-9313-87f778e3953b:
+      size:
+        width: 100
+        height: 110
+      position:
+        x: 100
+        'y': 160
+      z: 0
+      embeds:
+        - 221d6ea4-6868-40c1-bedf-04c5a3e5ddda
+    221d6ea4-6868-40c1-bedf-04c5a3e5ddda:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 120
+        'y': 190
+      z: 1
+      parent: e5106a58-3c1e-43f9-9313-87f778e3953b
+      embeds: []
+      iscontainedinside:
+        - e5106a58-3c1e-43f9-9313-87f778e3953b
+        - e5106a58-3c1e-43f9-9313-87f778e3953b
+        - e5106a58-3c1e-43f9-9313-87f778e3953b
+Outputs:
+  ApplicationName:
+    Description: "Application name"
+    Value:
+      Ref: Application
+  EnvironmentName:
+    Description: "Environment name"
+    Value:
+      Ref: Environment
+  Endpoint:
+    Description: "Environment public endpoint"
+    Value: !GetAtt Environment.EndpointURL
+Resources:
+  Application:
+    Type: 'AWS::ElasticBeanstalk::Application'
+    Properties: {}
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: e5106a58-3c1e-43f9-9313-87f778e3953b
+  Environment:
+    Type: 'AWS::ElasticBeanstalk::Environment'
+    Properties:
+      ApplicationName: !Ref Application
+      SolutionStackName: "64bit Amazon Linux 2017.09 v2.6.5 running PHP 7.1"
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 221d6ea4-6868-40c1-bedf-04c5a3e5ddda

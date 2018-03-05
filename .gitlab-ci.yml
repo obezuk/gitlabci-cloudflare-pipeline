@@ -1,0 +1,140 @@
+image: obezuk/gitlab-ci-cloudflare:latest
+
+stages:
+  - build-test-stack
+  - deploy-test-app
+  - test-test-app
+  - destroy-test-app
+  - build-branch-stack
+  - deploy-branch-app
+
+# Templates
+
+.build-stack: &build_stack
+  script:
+    - aws cloudformation deploy --template-file ./cloudformation.yml --stack-name $STACK_NAME --no-fail-on-empty-changeset
+
+.deploy-stack: &deploy_stack
+  script:
+    - cd src
+    - export APPLICATION_NAME=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='ApplicationName'].OutputValue" --output text`
+    - echo $APPLICATION_NAME
+    - export APPLICATION_ENDPOINT=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='Endpoint'].OutputValue" --output text`
+    - echo $APPLICATION_ENDPOINT
+    - export ENVIRONMENT_NAME=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='EnvironmentName'].OutputValue" --output text`
+    - echo $ENVIRONMENT_NAME
+    - mkdir -p .elasticbeanstalk
+    - cp ../elasticbeanstalk-config.tmpl.yml .elasticbeanstalk/config.yml
+    - sed -i "s~%%APPLICATION_NAME%%~${APPLICATION_NAME}~g" .elasticbeanstalk/config.yml
+    - sed -i "s~%%ENVIRONMENT_NAME%%~${ENVIRONMENT_NAME}~g" .elasticbeanstalk/config.yml
+    - sed -i "s~%%AWS_DEFAULT_REGION%%~${AWS_DEFAULT_REGION}~g" .elasticbeanstalk/config.yml
+    - cat .elasticbeanstalk/config.yml
+    - eb use $ENVIRONMENT_NAME
+    - eb deploy
+
+.deploy-cloudflare-dns: &deploy_cloudflare_dns
+  script:
+    - export ENDPOINT=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='Endpoint'].OutputValue" --output text`
+    - echo $ENDPOINT;
+    - 'if cli4 --yaml name=${SUB}.${TLD} /zones/:${TLD}/dns_records | grep "name: ${SUB}.${TLD}"; then cli4 --delete /zones/:${TLD}/dns_records/:${SUB}.${TLD} && cli4 --yaml --post name="${SUB}" type="${TYPE}" content="${ENDPOINT}" proxied="true" /zones/:${TLD}/dns_records; else cli4 --yaml --post name="${SUB}" type="${TYPE}" content="${ENDPOINT}" proxied="true" /zones/:${TLD}/dns_records; fi'
+
+.destroy-cloudflare-dns: &destroy_cloudflare_dns
+  script:
+    - 'if cli4 --yaml name=${SUB}.${TLD} /zones/:${TLD}/dns_records | grep "name: ${SUB}.${TLD}"; then cli4 --delete /zones/:${TLD}/dns_records/:${SUB}.${TLD}; else echo Skipping; fi'
+
+.destroy-stack: &destroy_stack
+  script:
+    - aws cloudformation delete-stack --stack-name $STACK_NAME
+    - aws cloudformation wait stack-delete-complete --stack-name $STACK_NAME
+
+# Test Stage
+
+build-test-stack:
+  <<: *build_stack
+  stage: build-test-stack
+  variables:
+    STACK_NAME: ${CI_PROJECT_NAME}-ci${CI_PIPELINE_ID}
+
+test-test-app:
+  stage: test-test-app
+  script:
+    - curl https://${CI_PROJECT_NAME}-ci${CI_PIPELINE_ID}.${CF_DOMAIN} | grep "Hello world"
+
+deploy-test-app:
+  <<: *deploy_stack
+  stage: deploy-test-app
+  variables:
+    STACK_NAME: ${CI_PROJECT_NAME}-ci${CI_PIPELINE_ID}
+
+deploy-test-dns:
+  <<: *deploy_cloudflare_dns
+  stage: deploy-test-app
+  variables:
+    TYPE: CNAME
+    SUB: ${CI_PROJECT_NAME}-ci${CI_PIPELINE_ID}
+    STACK_NAME: ${CI_PROJECT_NAME}-ci${CI_PIPELINE_ID}
+    TLD: ${CF_DOMAIN}
+
+destroy-test-dns:
+  <<: *destroy_cloudflare_dns
+  stage: destroy-test-app
+  when: always # Destroy test dns regardless of Pipeline success
+  variables:
+    SUB: ${CI_PROJECT_NAME}-ci${CI_PIPELINE_ID}
+    STACK_NAME: ${CI_PROJECT_NAME}-ci${CI_PIPELINE_ID}
+    TLD: ${CF_DOMAIN}
+
+destroy-test-app:
+  <<: *destroy_stack
+  stage: destroy-test-app
+  when: always # Destroy test environment regardless of Pipeline success
+  variables:
+    STACK_NAME: ${CI_PROJECT_NAME}-ci${CI_PIPELINE_ID}
+
+# Review Apps
+
+build-branch-stack:
+  <<: *build_stack
+  stage: build-branch-stack
+  environment:
+      name: $CI_COMMIT_REF_SLUG-app
+      on_stop: destroy-branch-app
+  variables:
+    STACK_NAME: ${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}
+
+deploy-branch-app:
+  <<: *deploy_stack
+  stage: deploy-branch-app
+  variables:
+    STACK_NAME: ${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}
+
+deploy-branch-dns:
+  <<: *deploy_cloudflare_dns
+  stage: deploy-branch-app
+  variables:
+    TYPE: CNAME
+    SUB: ${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}
+    STACK_NAME: ${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}
+    TLD: ${CF_DOMAIN}
+
+destroy-branch-dns:
+  <<: *destroy_cloudflare_dns
+  stage: build-branch-stack
+  environment:
+    name: $CI_COMMIT_REF_SLUG-app
+    action: stop
+  when: manual
+  variables:
+    SUB: ${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}
+    STACK_NAME: ${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}
+    TLD: ${CF_DOMAIN}
+
+destroy-branch-app:
+  <<: *destroy_stack
+  stage: build-branch-stack
+  environment:
+    name: $CI_COMMIT_REF_SLUG-app
+    action: stop
+  when: manual
+  variables:
+    STACK_NAME: ${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}

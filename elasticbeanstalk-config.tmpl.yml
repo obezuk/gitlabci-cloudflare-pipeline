@@ -1,0 +1,9 @@
+branch-defaults:
+  master:
+    environment: %%ENVIRONMENT_NAME%%
+global:
+  application_name: %%APPLICATION_NAME%%
+  default_platform: 64bit Amazon Linux 2017.09 v2.6.5 running PHP 7.1
+  default_region: %%AWS_DEFAULT_REGION%%
+  profile: null
+  sc: git
